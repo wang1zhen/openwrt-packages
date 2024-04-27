@@ -24,15 +24,19 @@ rm -rf "/tmp/luci-modulecache"
 uci set luci.main.mediaurlbase=/luci-static/argon
 
 #设置root密码
-sed -i 's|root:::0:99999:7:::|root:$6$gyMxdm3KrPiL87$Lgn9dsvhiozWbH/HYoXeQmx4VdGU8fSv91NTvNGGDRHkVBIMOLCrl.2m42CD.2OBP4Ee26ho.3YqXCVXZKdJ1.::0:99999:7:::|g' /etc/shadow
-sed -i 's|root::0:0:99999:7:::|root:$6$gyMxdm3KrPiL87$Lgn9dsvhiozWbH/HYoXeQmx4VdGU8fSv91NTvNGGDRHkVBIMOLCrl.2m42CD.2OBP4Ee26ho.3YqXCVXZKdJ1.:0:0:99999:7:::|g' /etc/shadow
+sed -i '/^root:/c\root:$6$gyMxdm3KrPiL87$Lgn9dsvhiozWbH/HYoXeQmx4VdGU8fSv91NTvNGGDRHkVBIMOLCrl.2m42CD.2OBP4Ee26ho.3YqXCVXZKdJ1.::0:99999:7:::' /etc/shadow
+
+#加入dropbear ssh_key
+touch /etc/dropbear/authorized_keys
+chmod 600 /etc/dropbear/authorized_keys
+echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO728MqlrMNZUA9dqa/bzRL1mMOy5QJhP96l+LxchoH/ misc|wang1zhendire@hotmail.com" >> /etc/dropbear/authorized_keys
 
 #设置默认ip地址
 uci set network.lan.proto='dhcp'
-uci delete network.lan.ipaddr
-uci delete network.lan.netmask
-uci delete network.lan.gateway
-uci delete network.lan.dns
+#uci delete network.lan.ipaddr
+#uci delete network.lan.netmask
+#uci delete network.lan.gateway
+#uci delete network.lan.dns
 uci set network.lan.ip6assign='64'
 #my custom settings
 uci delete network.@device[0].ports
