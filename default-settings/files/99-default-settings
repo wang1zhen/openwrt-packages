@@ -37,7 +37,8 @@ uci delete network.lan.ipaddr
 uci delete network.lan.netmask
 uci delete network.lan.gateway
 uci delete network.lan.dns
-uci set network.lan.ip6assign='64'
+#uci set network.lan.ip6assign='64'
+
 # Physical interface
 uci delete network.@device[0].ports
 uci add_list network.@device[0].ports='eth0'
@@ -46,6 +47,13 @@ uci add_list network.@device[0].ports='eth2'
 uci add_list network.@device[0].ports='eth3'
 uci delete network.wan
 uci delete network.wan6
+
+uci set network.lan6=interface
+uci set network.lan6.proto='dhcpv6'
+uci set network.lan6.device='@lan'
+uci set network.lan6.reqaddress='try'
+uci set network.lan6.reqprefix='auto'
+
 uci commit network
 
 # 设置web管理端口
