@@ -1,66 +1,107 @@
 #!/bin/sh
 
-uci -q get system.@imm_init[0] > "/dev/null" || uci -q add system imm_init > "/dev/null"
+. /etc/openwrt_release
 
-if ! uci -q get system.@imm_init[0].lang > "/dev/null"; then
-	uci -q batch <<-EOF
-		set luci.main.lang="auto"
-		commit luci
-
-		set system.@imm_init[0].lang="1"
-		commit system
-	EOF
+if [ "${DISTRIB_TARGET%%/*}" != "x86" ] || [ "${DISTRIB_TARGET#*/}" != "64" ]; then
+	logger -t default-settings "Skipping device-specific defaults on target ${DISTRIB_TARGET:-unknown}"
+	exit 0
 fi
 
-ln -sf "/sbin/ip" "/usr/bin/ip"
+uci -q get system.@personal_init[0] > /dev/null || uci -q add system personal_init > /dev/null
 
-sed -i "/log-facility/d" "/etc/dnsmasq.conf"
-echo "log-facility=/dev/null" >> "/etc/dnsmasq.conf"
+uci -q batch <<-EOF
+	set luci.main.lang='auto'
+	set luci.main.mediaurlbase='/luci-static/bootstrap'
 
-rm -f "/www/luci-static/resources/view/status/include/29_ethinfo.js"
-rm -f "/tmp/luci-indexcache"
-rm -rf "/tmp/luci-modulecache"
+	delete dhcp.@dnsmasq[0].logfacility
+	set dhcp.@dnsmasq[0].logfacility='/dev/null'
 
-uci set luci.main.mediaurlbase=/luci-static/argon
+	delete uhttpd.main.listen_http
+	delete uhttpd.main.listen_https
+	add_list uhttpd.main.listen_http='0.0.0.0:80'
+	add_list uhttpd.main.listen_http='[::]:80'
+	add_list uhttpd.main.listen_https='0.0.0.0:8888'
+	add_list uhttpd.main.listen_https='[::]:8888'
+	set uhttpd.main.redirect_https='1'
 
-# 设置root密码
+	set system.@personal_init[0].base='1'
+EOF
+
+# This is an intentional personal-image credential. The hash is public because
+# this repository is public; change it immediately if the image is redistributed.
 sed -i '/^root:/c\root:$6$gyMxdm3KrPiL87$Lgn9dsvhiozWbH/HYoXeQmx4VdGU8fSv91NTvNGGDRHkVBIMOLCrl.2m42CD.2OBP4Ee26ho.3YqXCVXZKdJ1.::0:99999:7:::' /etc/shadow
 
-# 加入dropbear ssh_key
+ssh_key='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO728MqlrMNZUA9dqa/bzRL1mMOy5QJhP96l+LxchoH/ misc|wang1zhendire@hotmail.com'
+mkdir -p /etc/dropbear
 touch /etc/dropbear/authorized_keys
-chmod 600 /etc/dropbear/authorized_keys
-echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO728MqlrMNZUA9dqa/bzRL1mMOy5QJhP96l+LxchoH/ misc|wang1zhendire@hotmail.com" >> /etc/dropbear/authorized_keys
+chmod 0600 /etc/dropbear/authorized_keys
+grep -qxF "$ssh_key" /etc/dropbear/authorized_keys || printf '%s\n' "$ssh_key" >> /etc/dropbear/authorized_keys
 
-# 设置默认ip地址
-uci set network.lan.proto='dhcp'
-uci delete network.lan.ipaddr
-uci delete network.lan.netmask
-uci delete network.lan.gateway
-uci delete network.lan.dns
-#uci set network.lan.ip6assign='64'
+ports_ready=1
+for port in eth0 eth1 eth2 eth3; do
+	if [ ! -d "/sys/class/net/$port" ]; then
+		logger -t default-settings "Missing $port; preserving the generated network configuration"
+		ports_ready=0
+	fi
+done
 
-# Physical interface
-uci delete network.@device[0].ports
-uci add_list network.@device[0].ports='eth0'
-uci add_list network.@device[0].ports='eth1'
-uci add_list network.@device[0].ports='eth2'
-uci add_list network.@device[0].ports='eth3'
-uci delete network.wan
-uci delete network.wan6
+if [ "$ports_ready" -eq 1 ]; then
+	bridge_section=''
+	for section in $(uci -q show network | sed -n "s/^network\.\([^.=]*\)=device$/\1/p"); do
+		if [ "$(uci -q get "network.$section.name")" = 'br-lan' ]; then
+			bridge_section="$section"
+			break
+		fi
+	done
 
-uci set network.lan6=interface
-uci set network.lan6.proto='dhcpv6'
-uci set network.lan6.device='@lan'
-uci set network.lan6.reqaddress='try'
-uci set network.lan6.reqprefix='auto'
+	if [ -z "$bridge_section" ]; then
+		bridge_section='br_lan'
+		uci -q batch <<-EOF
+			set network.$bridge_section='device'
+			set network.$bridge_section.name='br-lan'
+			set network.$bridge_section.type='bridge'
+		EOF
+	fi
 
-uci commit network
+	uci -q batch <<-EOF
+		delete network.$bridge_section.ports
+		add_list network.$bridge_section.ports='eth0'
+		add_list network.$bridge_section.ports='eth1'
+		add_list network.$bridge_section.ports='eth2'
+		add_list network.$bridge_section.ports='eth3'
 
-# 设置web管理端口
-uci delete uhttpd.main.listen_http
-uci delete uhttpd.main.listen_https
-uci add_list uhttpd.main.listen_http='0.0.0.0:8888'
-uci add_list uhttpd.main.listen_http='[::]:8888'
-uci commit uhttpd
+		set network.lan='interface'
+		set network.lan.device='br-lan'
+		set network.lan.proto='dhcp'
+		delete network.lan.ipaddr
+		delete network.lan.netmask
+		delete network.lan.gateway
+		delete network.lan.dns
+		delete network.lan.ip6assign
+
+		delete network.wan
+		delete network.wan6
+
+		set network.lan6='interface'
+		set network.lan6.proto='dhcpv6'
+		set network.lan6.device='@lan'
+		set network.lan6.reqaddress='try'
+		set network.lan6.reqprefix='auto'
+
+		set dhcp.lan.ignore='1'
+		set dhcp.lan.dhcpv4='disabled'
+		set dhcp.lan.dhcpv6='disabled'
+		set dhcp.lan.ra='disabled'
+		set dhcp.lan.ndp='disabled'
+
+		set system.@personal_init[0].network='1'
+	EOF
+	uci -q commit network
+	uci -q commit dhcp
+fi
+
+uci -q commit luci
+uci -q commit uhttpd
+uci -q commit system
 
 exit 0
